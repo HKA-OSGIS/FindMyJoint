@@ -1,0 +1,81 @@
+services:
+  postgis:
+    image: postgis/postgis:15-3.3
+    container_name: postgis_db
+    restart: always
+    environment:
+      POSTGRES_DB: gis
+      POSTGRES_USER: gis
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5431:5432"
+    volumes:
+      - ./data/postgis:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gis -d gis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  geoserver:
+    image: kartoza/geoserver:2.24.0
+    container_name: geoserver_app
+    restart: always
+    depends_on:
+      - postgis
+    ports:
+      - "8080:8080"
+    environment:
+      GEOSERVER_ADMIN_PASSWORD: admin_geoserver
+      POSTGRES_HOST: postgis
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: gis
+      POSTGRES_PASSWORD: password
+    volumes:
+      - ./data/geoserver:/opt/geoserver/data_dir
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin_app
+    restart: always
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: postgres@postgres.com
+      PGADMIN_DEFAULT_PASSWORD: postgres
+    depends_on:
+      - postgis
+
+  osm2pgsql_importer:
+    image: overv/openstreetmap-tile-server:latest
+    container_name: osm2pgsql_importer
+    restart: "no"
+    depends_on:
+      - postgis
+    env_file:
+      - .env
+    volumes:
+      - ./data/osm:/data
+      - ./styles:/styles
+      - ./import_osm.sh:/usr/local/bin/import_osm.sh
+    entrypoint: ["/bin/sh", "/usr/local/bin/import_osm.sh"]
+
+  osm_updater:
+    build:
+      context: .
+      dockerfile: Dockerfile.updater
+    container_name: osm_updater
+    restart: always
+    depends_on:
+      postgis:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./data/diffs:/data/diffs
+      - ./update_osm.sh:/usr/local/bin/update_osm.sh
+      - ./data/osm:/data/osm
+      - ./app.py:/usr/local/bin/app.py
+    entrypoint: ["/bin/sh", "/usr/local/bin/update_osm.sh"]
+
